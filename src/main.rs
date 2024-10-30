@@ -40,6 +40,8 @@ enum WorkAction {
     Remove { id: usize },
     /// Marks the entry with the provided ID as completed.
     Complete { id: usize },
+    /// Puts the task with the provided ID at the top of the list.
+    Prio { id: usize },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -114,12 +116,11 @@ impl WorkEntry {
 
     fn to_printable_row(&self) -> String {
         format!(
-            " {} {} {:<width$} {} {} {}",
+            " {} {} {:<width$} {} {}",
             self.id,
             "->>".green(),
             self.name.bright_cyan(),
             "::".green(),
-            self.created_at.to_rfc2822().as_str().yellow(),
             self.status.get_icon(),
             width = MAX_NAME_LENGTH,
         )
@@ -159,11 +160,7 @@ fn main() -> eyre::Result<()> {
 
     match args.action {
         None => {
-            let latest = wd_file
-                .entries
-                .iter()
-                .filter(|e| !e.is_completed())
-                .max_by(|a, b| a.id.cmp(&b.id));
+            let latest = wd_file.entries.iter().filter(|e| !e.is_completed()).last();
 
             if let Some(l) = latest {
                 println!("{}", l.to_printable_row());
@@ -181,9 +178,8 @@ fn main() -> eyre::Result<()> {
             wd_file.save(&config_path).wrap_err("Failed to save file")?;
         }
         Some(WorkAction::List { all }) => {
-            let mut entries = wd_file.entries;
-            entries.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-            for entry in entries.iter() {
+            let entries = wd_file.entries;
+            for entry in entries.iter().rev() {
                 if !all && entry.is_completed() {
                     continue;
                 }
@@ -209,6 +205,22 @@ fn main() -> eyre::Result<()> {
                 .wrap_err("No entry with the provided ID")?;
             eyre::ensure!(entry.is_completed(), "Entry is already marked as completed");
             entry.complete();
+            wd_file
+                .save(&config_path)
+                .wrap_err("Failed to save changes")?;
+        }
+        Some(WorkAction::Prio { id }) => {
+            let (current_index, _) = wd_file
+                .entries
+                .iter()
+                .enumerate()
+                .find(|(_, entry)| entry.id == id)
+                .wrap_err("No entry with the provided ID")?;
+
+            let mut entry = wd_file.entries.remove(current_index);
+            entry.modified_at = Utc::now();
+            wd_file.entries.push(entry);
+
             wd_file
                 .save(&config_path)
                 .wrap_err("Failed to save changes")?;
