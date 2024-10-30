@@ -116,13 +116,11 @@ impl WorkEntry {
 
     fn to_printable_row(&self) -> String {
         format!(
-            " {} {} {:<width$} {} {}",
+            " {} {} {} {}",
             self.id,
             "->>".green(),
             self.name.bright_cyan(),
-            "::".green(),
             self.status.get_icon(),
-            width = MAX_NAME_LENGTH,
         )
     }
 
