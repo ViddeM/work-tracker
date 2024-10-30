@@ -1,0 +1,14 @@
+[package]
+name = "work-tracker"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chrono = { version = "0.4.38", features = ["serde"] }
+clap = { version = "4.5.20", features = ["derive"] }
+color-eyre = "0.6.3"
+colored = "2.1.0"
+eyre = "0.6.12"
+home = "0.5.9"
+ron = "0.8.1"
+serde = { version = "1.0.213", features = ["derive"] }
