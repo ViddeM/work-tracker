@@ -18,7 +18,7 @@ const MAX_NAME_LENGTH: usize = 28;
 #[command(version, about, long_about = None)]
 struct Args {
     #[command(subcommand)]
-    action: WorkAction,
+    action: Option<WorkAction>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -111,6 +111,23 @@ impl WorkEntry {
         self.modified_at = Utc::now();
         self.status = WorkEntryStatus::Completed;
     }
+
+    fn to_printable_row(&self) -> String {
+        format!(
+            " {} {} {:<width$} {} {} {}",
+            self.id,
+            "->>".green(),
+            self.name.bright_cyan(),
+            "::".green(),
+            self.created_at.to_rfc2822().as_str().yellow(),
+            self.status.get_icon(),
+            width = MAX_NAME_LENGTH,
+        )
+    }
+
+    fn is_completed(&self) -> bool {
+        self.status == WorkEntryStatus::Completed
+    }
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq)]
@@ -141,7 +158,20 @@ fn main() -> eyre::Result<()> {
         get_or_create_file_file(&config_path).wrap_err("Failed to get or create config file")?;
 
     match args.action {
-        WorkAction::Add { name, description } => {
+        None => {
+            let latest = wd_file
+                .entries
+                .iter()
+                .filter(|e| !e.is_completed())
+                .max_by(|a, b| a.id.cmp(&b.id));
+
+            if let Some(l) = latest {
+                println!("{}", l.to_printable_row());
+            } else {
+                println!("No active tasks, great job!");
+            }
+        }
+        Some(WorkAction::Add { name, description }) => {
             if name.chars().count() > MAX_NAME_LENGTH {
                 eyre::bail!("Name can have at most {MAX_NAME_LENGTH} chars");
             }
@@ -150,27 +180,18 @@ fn main() -> eyre::Result<()> {
 
             wd_file.save(&config_path).wrap_err("Failed to save file")?;
         }
-        WorkAction::List { all } => {
+        Some(WorkAction::List { all }) => {
             let mut entries = wd_file.entries;
             entries.sort_by(|a, b| b.created_at.cmp(&a.created_at));
             for entry in entries.iter() {
-                if !all && entry.status != WorkEntryStatus::Created {
+                if !all && entry.is_completed() {
                     continue;
                 }
 
-                println!(
-                    " {} {} {:<width$} {} {} {}",
-                    entry.id,
-                    "->>".green(),
-                    entry.name.bright_cyan(),
-                    "::".green(),
-                    entry.created_at.to_rfc2822().as_str().yellow(),
-                    entry.status.get_icon(),
-                    width = MAX_NAME_LENGTH,
-                );
+                println!("{}", entry.to_printable_row());
             }
         }
-        WorkAction::Remove { id } => {
+        Some(WorkAction::Remove { id }) => {
             let (index, _) = wd_file
                 .entries
                 .iter()
@@ -180,16 +201,13 @@ fn main() -> eyre::Result<()> {
             wd_file.entries.remove(index);
             wd_file.save(&config_path).wrap_err("Failed to save file")?;
         }
-        WorkAction::Complete { id } => {
+        Some(WorkAction::Complete { id }) => {
             let entry = wd_file
                 .entries
                 .iter_mut()
                 .find(|entry| entry.id == id)
                 .wrap_err("No entry with the provided ID")?;
-            eyre::ensure!(
-                entry.status == WorkEntryStatus::Created,
-                "Entry is already marked as completed"
-            );
+            eyre::ensure!(entry.is_completed(), "Entry is already marked as completed");
             entry.complete();
             wd_file
                 .save(&config_path)
