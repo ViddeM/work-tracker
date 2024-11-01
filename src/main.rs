@@ -30,6 +30,14 @@ enum WorkAction {
         /// Optiona description of the action.
         description: Option<String>,
     },
+    /// Edit a work action entry.
+    Edit {
+        /// The ID of the entry to edit.
+        id: usize,
+
+        /// The new description of the entry.
+        description: String,
+    },
     /// List all unfinished work actions.
     List {
         /// Show all entries, not just completed ones.
@@ -80,6 +88,17 @@ impl WorkDataFile {
 
         Ok(())
     }
+
+    fn get_index_for_id(&self, id: usize) -> eyre::Result<usize> {
+        let (current_index, _) = self
+            .entries
+            .iter()
+            .enumerate()
+            .find(|(_, entry)| entry.id == id)
+            .wrap_err("No entry with the provided ID")?;
+
+        Ok(current_index)
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -129,7 +148,7 @@ impl WorkEntry {
     }
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 enum WorkEntryStatus {
     Created,
     Completed,
@@ -186,12 +205,7 @@ fn main() -> eyre::Result<()> {
             }
         }
         Some(WorkAction::Remove { id }) => {
-            let (index, _) = wd_file
-                .entries
-                .iter()
-                .enumerate()
-                .find(|(_, entry)| entry.id == id)
-                .wrap_err("No entry with the provided ID")?;
+            let index = wd_file.get_index_for_id(id)?;
             wd_file.entries.remove(index);
             wd_file.save(&config_path).wrap_err("Failed to save file")?;
         }
@@ -211,20 +225,25 @@ fn main() -> eyre::Result<()> {
                 .wrap_err("Failed to save changes")?;
         }
         Some(WorkAction::Prio { id }) => {
-            let (current_index, _) = wd_file
-                .entries
-                .iter()
-                .enumerate()
-                .find(|(_, entry)| entry.id == id)
-                .wrap_err("No entry with the provided ID")?;
+            let index = wd_file.get_index_for_id(id)?;
 
-            let mut entry = wd_file.entries.remove(current_index);
+            let mut entry = wd_file.entries.remove(index);
             entry.modified_at = Utc::now();
             wd_file.entries.push(entry);
 
             wd_file
                 .save(&config_path)
                 .wrap_err("Failed to save changes")?;
+        }
+        Some(WorkAction::Edit { id, description }) => {
+            let index = wd_file.get_index_for_id(id)?;
+
+            let entry = wd_file
+                .entries
+                .get_mut(index)
+                .ok_or_eyre("Expected entry to exist")?;
+
+            entry.description = Some(description);
         }
     };
 
