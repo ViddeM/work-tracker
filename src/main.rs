@@ -201,7 +201,10 @@ fn main() -> eyre::Result<()> {
                 .iter_mut()
                 .find(|entry| entry.id == id)
                 .wrap_err("No entry with the provided ID")?;
-            eyre::ensure!(entry.is_completed(), "Entry is already marked as completed");
+            eyre::ensure!(
+                !entry.is_completed(),
+                "Entry is already marked as completed"
+            );
             entry.complete();
             wd_file
                 .save(&config_path)
