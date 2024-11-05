@@ -35,8 +35,13 @@ enum WorkAction {
         /// The ID of the entry to edit.
         id: usize,
 
-        /// The new description of the entry.
-        description: String,
+        /// The new description of the entry if any.
+        #[arg(short, long)]
+        description: Option<String>,
+
+        /// The new status of the entry.
+        #[arg(short, long)]
+        status: Option<WorkEntryStatus>,
     },
     /// List all unfinished work actions.
     List {
@@ -177,7 +182,7 @@ impl WorkEntry {
     }
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, clap::ValueEnum)]
 enum WorkEntryStatus {
     Created,
     Completed,
@@ -194,7 +199,7 @@ impl WorkEntryStatus {
     fn to_colored_string(&self) -> ColoredString {
         match self {
             WorkEntryStatus::Created => "Created".bright_blue(),
-            WorkEntryStatus::Completed => todo!(),
+            WorkEntryStatus::Completed => "Completed".green(),
         }
     }
 }
@@ -267,9 +272,26 @@ fn main() -> eyre::Result<()> {
                 .save(&config_path)
                 .wrap_err("Failed to save changes")?;
         }
-        Some(WorkAction::Edit { id, description }) => {
+        Some(WorkAction::Edit {
+            id,
+            description,
+            status,
+        }) => {
             let entry = wd_file.get_entry_mut(id)?;
-            entry.description = Some(description);
+
+            if description.is_none() && status.is_none() {
+                eyre::bail!("No action provided to edit the entry, please provide either description or status (or both)");
+            }
+
+            entry.description = description;
+
+            if let Some(status) = status {
+                entry.status = status;
+            }
+
+            wd_file
+                .save(&config_path)
+                .wrap_err("Failed to save changes")?;
         }
         Some(WorkAction::Show { id }) => {
             let Some(WorkEntry {
@@ -287,19 +309,31 @@ fn main() -> eyre::Result<()> {
 
             let div = "::".truecolor(175, 175, 175);
             println!(
-                "{} {div} {} {div} {} {div} {} {div} {created_at:?} / {modified_at:?}",
+                "{} {div} {} {div} {} {div} {} {div} {} / {}",
                 id.to_string().bright_blue(),
                 name.bright_green(),
                 description
                     .as_ref()
                     .unwrap_or(&"<No description>".to_string())
                     .yellow(),
-                status.to_colored_string()
+                status.to_colored_string(),
+                created_at.to_formatted_string(),
+                modified_at.to_formatted_string()
             )
         }
     };
 
     Ok(())
+}
+
+trait DisplayableDateTime {
+    fn to_formatted_string(self) -> String;
+}
+
+impl DisplayableDateTime for DateTime<Utc> {
+    fn to_formatted_string(self) -> String {
+        self.format("%H:%M %d/%m %Y").to_string()
+    }
 }
 
 fn get_or_create_file_file(path: &Path) -> eyre::Result<WorkDataFile> {
