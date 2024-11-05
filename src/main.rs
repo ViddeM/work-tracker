@@ -111,27 +111,25 @@ impl WorkDataFile {
     }
 
     fn get_entry(&self, id: usize) -> eyre::Result<&WorkEntry> {
-        Ok(self
-            .entries
+        self.entries
             .iter()
             .find(|entry| entry.id == id)
-            .wrap_err("Failed to find entry with the provided ID")?)
+            .wrap_err("Failed to find entry with the provided ID")
     }
 
     fn get_entry_or_first(&self, id: Option<usize>) -> eyre::Result<Option<&WorkEntry>> {
         if let Some(id) = id {
-            return self.get_entry(id).map(|e| Some(e));
+            return self.get_entry(id).map(Some);
         }
 
         return Ok(self.entries.iter().filter(|e| !e.is_completed()).last());
     }
 
     fn get_entry_mut(&mut self, id: usize) -> eyre::Result<&mut WorkEntry> {
-        Ok(self
-            .entries
+        self.entries
             .iter_mut()
             .find(|entry| entry.id == id)
-            .wrap_err("Failed to find entry with the provided ID")?)
+            .wrap_err("Failed to find entry with the provided ID")
     }
 }
 
@@ -189,7 +187,7 @@ enum WorkEntryStatus {
 }
 
 impl WorkEntryStatus {
-    fn get_icon<'a>(&self) -> String {
+    fn get_icon(&self) -> String {
         match self {
             WorkEntryStatus::Created => String::new(),
             WorkEntryStatus::Completed => format!("{}", "✔".green()),
