@@ -6,10 +6,16 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand};
-use colored::{ColoredString, Colorize};
-use eyre::{Context, ContextCompat, OptionExt};
+use colored::Colorize;
+use eyre::{Context, OptionExt};
 use home::home_dir;
-use serde::{Deserialize, Serialize};
+use work_data_file::WorkDataFile;
+use work_entry::WorkEntry;
+use work_entry_status::WorkEntryStatus;
+
+pub mod work_data_file;
+pub mod work_entry;
+pub mod work_entry_status;
 
 const MAX_NAME_LENGTH: usize = 28;
 
@@ -60,146 +66,6 @@ enum WorkAction {
     Complete { id: usize },
     /// Puts the task with the provided ID at the top of the list.
     Prio { id: usize },
-}
-
-#[derive(Serialize, Deserialize)]
-struct WorkDataFile {
-    version: FileVersion,
-    entries: Vec<WorkEntry>,
-}
-
-impl WorkDataFile {
-    pub fn new() -> Self {
-        Self {
-            version: FileVersion::Initial,
-            entries: vec![],
-        }
-    }
-
-    pub fn add_entry(&mut self, name: String, description: Option<String>) {
-        let highest_num = self
-            .entries
-            .iter()
-            .map(|e| &e.id)
-            .max()
-            .map(|v| v + 1)
-            .unwrap_or(0);
-        let new_entry = WorkEntry::new(highest_num, name, description);
-
-        self.entries.push(new_entry);
-    }
-
-    pub fn save(&self, path: &Path) -> eyre::Result<()> {
-        let serialized = ron::to_string(&self).wrap_err("Failed to serialize wd_file")?;
-
-        let mut file = File::create(path).wrap_err("Failed to open config file to save changes")?;
-        file.write_all(serialized.as_bytes())
-            .wrap_err("Failed to write changes to file")?;
-
-        Ok(())
-    }
-
-    fn get_index_for_id(&self, id: usize) -> eyre::Result<usize> {
-        let (current_index, _) = self
-            .entries
-            .iter()
-            .enumerate()
-            .find(|(_, entry)| entry.id == id)
-            .wrap_err("No entry with the provided ID")?;
-
-        Ok(current_index)
-    }
-
-    fn get_entry(&self, id: usize) -> eyre::Result<&WorkEntry> {
-        self.entries
-            .iter()
-            .find(|entry| entry.id == id)
-            .wrap_err("Failed to find entry with the provided ID")
-    }
-
-    fn get_entry_or_first(&self, id: Option<usize>) -> eyre::Result<Option<&WorkEntry>> {
-        if let Some(id) = id {
-            return self.get_entry(id).map(Some);
-        }
-
-        return Ok(self.entries.iter().filter(|e| !e.is_completed()).last());
-    }
-
-    fn get_entry_mut(&mut self, id: usize) -> eyre::Result<&mut WorkEntry> {
-        self.entries
-            .iter_mut()
-            .find(|entry| entry.id == id)
-            .wrap_err("Failed to find entry with the provided ID")
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-enum FileVersion {
-    Initial,
-}
-
-#[derive(Serialize, Deserialize)]
-struct WorkEntry {
-    id: usize, // Just an incremental integer.
-    name: String,
-    description: Option<String>,
-    created_at: DateTime<Utc>,
-    modified_at: DateTime<Utc>,
-    status: WorkEntryStatus,
-}
-
-impl WorkEntry {
-    fn new(id: usize, name: String, description: Option<String>) -> Self {
-        Self {
-            id,
-            name,
-            description,
-            created_at: Utc::now(),
-            modified_at: Utc::now(),
-            status: WorkEntryStatus::Created,
-        }
-    }
-
-    fn complete(&mut self) {
-        self.modified_at = Utc::now();
-        self.status = WorkEntryStatus::Completed;
-    }
-
-    fn to_printable_row(&self) -> String {
-        format!(
-            " {} {} {} {}",
-            self.id,
-            "->>".green(),
-            self.name.bright_cyan(),
-            self.status.get_icon(),
-        )
-    }
-
-    fn is_completed(&self) -> bool {
-        self.status == WorkEntryStatus::Completed
-    }
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, clap::ValueEnum)]
-enum WorkEntryStatus {
-    Created,
-    Completed,
-}
-
-impl WorkEntryStatus {
-    fn get_icon(&self) -> String {
-        match self {
-            WorkEntryStatus::Created => String::new(),
-            WorkEntryStatus::Completed => format!("{}", "✔".green()),
-        }
-    }
-
-    fn to_colored_string(&self) -> ColoredString {
-        match self {
-            WorkEntryStatus::Created => "Created".bright_blue(),
-            WorkEntryStatus::Completed => "Completed".green(),
-        }
-    }
 }
 
 fn main() -> eyre::Result<()> {
@@ -336,7 +202,7 @@ impl DisplayableDateTime for DateTime<Utc> {
 
 fn get_or_create_file_file(path: &Path) -> eyre::Result<WorkDataFile> {
     if !path.exists() {
-        let wd_file = WorkDataFile::new();
+        let wd_file = WorkDataFile::default();
         let mut file = File::create_new(path).wrap_err("Failed to create config file")?;
         let serialized =
             ron::to_string(&wd_file).wrap_err("Failed to serialize initial wd_file")?;
