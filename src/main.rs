@@ -6,7 +6,7 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand};
-use color_eyre::owo_colors::OwoColorize;
+use colored::{ColoredString, Colorize};
 use eyre::{Context, ContextCompat, OptionExt};
 use home::home_dir;
 use serde::{Deserialize, Serialize};
@@ -43,6 +43,11 @@ enum WorkAction {
         /// Show all entries, not just completed ones.
         #[arg(short, long, default_value_t = false)]
         all: bool,
+    },
+    /// Show detailed info for an entry.
+    Show {
+        /// The id of the entry to show.
+        id: Option<usize>,
     },
     /// Removes the entry with the provided ID.
     Remove { id: usize },
@@ -98,6 +103,30 @@ impl WorkDataFile {
             .wrap_err("No entry with the provided ID")?;
 
         Ok(current_index)
+    }
+
+    fn get_entry(&self, id: usize) -> eyre::Result<&WorkEntry> {
+        Ok(self
+            .entries
+            .iter()
+            .find(|entry| entry.id == id)
+            .wrap_err("Failed to find entry with the provided ID")?)
+    }
+
+    fn get_entry_or_first(&self, id: Option<usize>) -> eyre::Result<Option<&WorkEntry>> {
+        if let Some(id) = id {
+            return self.get_entry(id).map(|e| Some(e));
+        }
+
+        return Ok(self.entries.iter().filter(|e| !e.is_completed()).last());
+    }
+
+    fn get_entry_mut(&mut self, id: usize) -> eyre::Result<&mut WorkEntry> {
+        Ok(self
+            .entries
+            .iter_mut()
+            .find(|entry| entry.id == id)
+            .wrap_err("Failed to find entry with the provided ID")?)
     }
 }
 
@@ -161,6 +190,13 @@ impl WorkEntryStatus {
             WorkEntryStatus::Completed => format!("{}", "✔".green()),
         }
     }
+
+    fn to_colored_string(&self) -> ColoredString {
+        match self {
+            WorkEntryStatus::Created => "Created".bright_blue(),
+            WorkEntryStatus::Completed => todo!(),
+        }
+    }
 }
 
 fn main() -> eyre::Result<()> {
@@ -210,11 +246,7 @@ fn main() -> eyre::Result<()> {
             wd_file.save(&config_path).wrap_err("Failed to save file")?;
         }
         Some(WorkAction::Complete { id }) => {
-            let entry = wd_file
-                .entries
-                .iter_mut()
-                .find(|entry| entry.id == id)
-                .wrap_err("No entry with the provided ID")?;
+            let entry = wd_file.get_entry_mut(id)?;
             eyre::ensure!(
                 !entry.is_completed(),
                 "Entry is already marked as completed"
@@ -236,14 +268,34 @@ fn main() -> eyre::Result<()> {
                 .wrap_err("Failed to save changes")?;
         }
         Some(WorkAction::Edit { id, description }) => {
-            let index = wd_file.get_index_for_id(id)?;
-
-            let entry = wd_file
-                .entries
-                .get_mut(index)
-                .ok_or_eyre("Expected entry to exist")?;
-
+            let entry = wd_file.get_entry_mut(id)?;
             entry.description = Some(description);
+        }
+        Some(WorkAction::Show { id }) => {
+            let Some(WorkEntry {
+                id,
+                name,
+                description,
+                created_at,
+                modified_at,
+                status,
+            }) = wd_file.get_entry_or_first(id)?
+            else {
+                println!("{}", "No unfinished tasks!".bright_green());
+                return Ok(());
+            };
+
+            let div = "::".truecolor(175, 175, 175);
+            println!(
+                "{} {div} {} {div} {} {div} {} {div} {created_at:?} / {modified_at:?}",
+                id.to_string().bright_blue(),
+                name.bright_green(),
+                description
+                    .as_ref()
+                    .unwrap_or(&"<No description>".to_string())
+                    .yellow(),
+                status.to_colored_string()
+            )
         }
     };
 
