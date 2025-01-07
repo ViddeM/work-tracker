@@ -9,12 +9,14 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 use eyre::{Context, OptionExt};
 use home::home_dir;
-use work_data_file::WorkDataFile;
+use work_data_file::{FileVersion, WorkDataFile};
 use work_entry::WorkEntry;
+use work_entry_id::{WorkEntryId, WorkEntryIdFull};
 use work_entry_status::WorkEntryStatus;
 
 pub mod work_data_file;
 pub mod work_entry;
+pub mod work_entry_id;
 pub mod work_entry_status;
 
 const MAX_NAME_LENGTH: usize = 28;
@@ -33,13 +35,15 @@ enum WorkAction {
     Add {
         /// What name the action should have (max 28 chars).
         name: String,
-        /// Optiona description of the action.
+        /// Optional description of the action.
         description: Option<String>,
+        /// Optional parent that this will be attached to.
+        parent: Option<WorkEntryIdFull>,
     },
     /// Edit a work action entry.
     Edit {
         /// The ID of the entry to edit.
-        id: usize,
+        id: WorkEntryIdFull,
 
         /// The new description of the entry if any.
         #[arg(short, long)]
@@ -58,14 +62,14 @@ enum WorkAction {
     /// Show detailed info for an entry.
     Show {
         /// The id of the entry to show.
-        id: Option<usize>,
+        id: Option<WorkEntryIdFull>,
     },
     /// Removes the entry with the provided ID.
-    Remove { id: usize },
+    Remove { id: WorkEntryIdFull },
     /// Marks the entry with the provided ID as completed.
-    Complete { id: usize },
+    Complete { id: WorkEntryIdFull },
     /// Puts the task with the provided ID at the top of the list.
-    Prio { id: usize },
+    Prio { id: WorkEntryIdFull },
 }
 
 fn main() -> eyre::Result<()> {
@@ -90,12 +94,20 @@ fn main() -> eyre::Result<()> {
                 println!("No active tasks, great job!");
             }
         }
-        Some(WorkAction::Add { name, description }) => {
+        Some(WorkAction::Add {
+            name,
+            description,
+            parent,
+        }) => {
             if name.chars().count() > MAX_NAME_LENGTH {
                 eyre::bail!("Name can have at most {MAX_NAME_LENGTH} chars");
             }
 
-            wd_file.add_entry(name, description);
+            if let Some(parent) = parent {
+                wd_file.add_child_entry(name, description, parent);
+            } else {
+                wd_file.add_entry(name, description);
+            }
 
             wd_file.save(&config_path).wrap_err("Failed to save file")?;
         }
@@ -110,12 +122,12 @@ fn main() -> eyre::Result<()> {
             }
         }
         Some(WorkAction::Remove { id }) => {
-            let index = wd_file.get_index_for_id(id)?;
+            let index = wd_file.get_index_for_id(&id)?;
             wd_file.entries.remove(index);
             wd_file.save(&config_path).wrap_err("Failed to save file")?;
         }
         Some(WorkAction::Complete { id }) => {
-            let entry = wd_file.get_entry_mut(id)?;
+            let entry = wd_file.get_entry_mut(&id)?;
             eyre::ensure!(
                 !entry.is_completed(),
                 "Entry is already marked as completed"
@@ -126,7 +138,7 @@ fn main() -> eyre::Result<()> {
                 .wrap_err("Failed to save changes")?;
         }
         Some(WorkAction::Prio { id }) => {
-            let index = wd_file.get_index_for_id(id)?;
+            let index = wd_file.get_index_for_id(&id)?;
 
             let mut entry = wd_file.entries.remove(index);
             entry.modified_at = Utc::now();
@@ -141,7 +153,7 @@ fn main() -> eyre::Result<()> {
             description,
             status,
         }) => {
-            let entry = wd_file.get_entry_mut(id)?;
+            let entry = wd_file.get_entry_mut(&id)?;
 
             if description.is_none() && status.is_none() {
                 eyre::bail!("No action provided to edit the entry, please provide either description or status (or both)");
@@ -165,7 +177,8 @@ fn main() -> eyre::Result<()> {
                 created_at,
                 modified_at,
                 status,
-            }) = wd_file.get_entry_or_first(id)?
+                children,
+            }) = wd_file.get_entry_or_first(id.as_ref())?
             else {
                 println!("{}", "No unfinished tasks!".bright_green());
                 return Ok(());
@@ -183,7 +196,15 @@ fn main() -> eyre::Result<()> {
                 status.to_colored_string(),
                 created_at.to_formatted_string(),
                 modified_at.to_formatted_string()
-            )
+            );
+
+            for child in children.iter() {
+                println!(
+                    "{} -- {}",
+                    child.id.to_string().bright_blue(),
+                    child.name.bright_green()
+                )
+            }
         }
     };
 
@@ -202,7 +223,10 @@ impl DisplayableDateTime for DateTime<Utc> {
 
 fn get_or_create_file_file(path: &Path) -> eyre::Result<WorkDataFile> {
     if !path.exists() {
-        let wd_file = WorkDataFile::default();
+        let wd_file = WorkDataFile {
+            version: FileVersion::current(),
+            entries: vec![],
+        };
         let mut file = File::create_new(path).wrap_err("Failed to create config file")?;
         let serialized =
             ron::to_string(&wd_file).wrap_err("Failed to serialize initial wd_file")?;
@@ -219,5 +243,10 @@ fn get_or_create_file_file(path: &Path) -> eyre::Result<WorkDataFile> {
         .wrap_err("Failed to read work file")?;
 
     let file: WorkDataFile = ron::from_str(&buf).wrap_err("Failed to parse file work entries")?;
+
+    eyre::ensure!(
+        file.is_current(),
+        "The stored data file is from an older version, please delete or update it before using the application."
+    );
     Ok(file)
 }
